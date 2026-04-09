@@ -43,10 +43,15 @@ Return ONLY valid JSON — no prose, no markdown.
 
 
 def _normalise_name(name: str) -> str:
-    """Lower-case, strip legal suffixes and punctuation for fuzzy comparison."""
+    """Lower-case, strip legal suffixes and ADR/listing tags for fuzzy comparison."""
     name = name.lower()
-    for suffix in ("limited", "ltd", "inc", "corp", "plc", "llc", "n.v.", "s.a.", "ag"):
-        name = re.sub(rf"\b{suffix}\b\.?", "", name)
+    for suffix in (
+        "limited", "ltd", "inc", "corp", "plc", "llc", "n.v.", "s.a.", "ag",
+        # ADR / depositary-receipt tags that Polygon appends — must be stripped
+        # so "Infosys Limited ADR" groups with "Infosys Limited" as one company.
+        "adr", "adrc", "ads", "sponsored adr", "unsponsored adr",
+    ):
+        name = re.sub(rf"\b{re.escape(suffix)}\b\.?", "", name)
     return re.sub(r"\s+", " ", name).strip()
 
 
