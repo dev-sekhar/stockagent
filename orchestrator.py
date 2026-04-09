@@ -36,6 +36,7 @@ from agents.date_range             import DateRangeAgent
 from agents.chart_agent            import ChartAgent
 from agents.comparison_chart_agent import ComparisonChartAgent
 from agents.news_agent             import NewsAgent
+from agents.sentiment_agent        import SentimentAgent
 from agents.company_profile        import CompanyProfileAgent
 from tools.company_data            import CompanyDataTool
 
@@ -312,6 +313,7 @@ class Orchestrator:
         self.comparison_chart_agent = ComparisonChartAgent()
         self.company_data_tool      = CompanyDataTool()
         self.news_agent             = NewsAgent(self.client)
+        self.sentiment_agent        = SentimentAgent(self.client)
         self.company_profile_agent  = CompanyProfileAgent(self.client)
 
         # ── Self-Healing Supervisor ───────────────────────────────────────────
@@ -439,6 +441,29 @@ class Orchestrator:
 
         if not all_candidates:
             raise ValueError(f"No listed companies found for '{company_or_ticker}'")
+
+        # ── Step C.5: probe Indian exchange variants for any ADR found ─────────
+        # yfinance search often returns the US ADR but omits .NS/.BO listings.
+        # We verify those variants directly so the exchange menu can appear.
+        adr_candidates = [c for c in all_candidates if c.get("is_adr")]
+        for adr in adr_candidates:
+            base = adr["ticker"].split(".")[0]
+            for suffix, exchange_label, raw_exchange in [
+                (".NS", "NSE (India)", "NSI"),
+                (".BO", "BSE (India)", "BSE"),
+            ]:
+                variant = base + suffix
+                if variant not in seen_tickers and verify_ticker(variant):
+                    seen_tickers.add(variant)
+                    all_candidates.append({
+                        "ticker":       variant,
+                        "name":         adr["name"],
+                        "exchange":     exchange_label,
+                        "raw_exchange": raw_exchange,
+                        "type":         "EQUITY",
+                        "is_adr":       False,
+                    })
+                    print(f"  🔍 [Orchestrator] Found exchange variant: {variant}")
 
         # ── Step D: filter + optional re-fetch ────────────────────────────────
         filtered, refetch_hints = self.candidate_filter.filter(
@@ -641,6 +666,22 @@ class Orchestrator:
 
         return company_data, news
 
+    def _fetch_sentiment(self, ticker: str, news: list) -> str:
+        """
+        Run SentimentAgent on curated news items.
+        Returns the formatted markdown string, or "" on failure / empty news.
+        """
+        if not news:
+            return ""
+        try:
+            print(f"  🧠 [SentimentAgent] Analysing {len(news)} article(s) for {ticker}…")
+            result = self.sentiment_agent.analyse(ticker, news)
+            if result:
+                return result.get("formatted", "")
+        except Exception as exc:
+            print(f"  ⚠️  [SentimentAgent] {exc}")
+        return ""
+
     def handle(self, user_query: str) -> str:
         """
         Classify the query, resolve the ticker, delegate to the right agent.
@@ -711,20 +752,21 @@ class Orchestrator:
             except Exception as exc:
                 return self._heal_and_retry(intent, ticker, exc, args)
 
-            # Enrich with company snapshot + news
+            # Enrich with company snapshot + news + sentiment
             print(f"  🏢 [CompanyProfileAgent] Fetching company snapshot for {ticker}…")
             company_data, news = self._fetch_company_snapshot(ticker)
             if company_data and not company_data.get("error"):
-                profile = self.company_profile_agent.summarise(
-                    ticker, company_data, news
-                )
-                return f"{price_text}\n\n---\n\n{profile}"
+                profile   = self.company_profile_agent.summarise(ticker, company_data, news)
+                sentiment = self._fetch_sentiment(ticker, news)
+                return f"{price_text}\n\n---\n\n{profile}{sentiment}"
             return price_text
 
         if intent == "get_company_info":
             print(f"  🏢 [CompanyProfileAgent] Fetching full company snapshot for {ticker}…")
             company_data, news = self._fetch_company_snapshot(ticker)
-            return self.company_profile_agent.summarise(ticker, company_data, news)
+            profile   = self.company_profile_agent.summarise(ticker, company_data, news)
+            sentiment = self._fetch_sentiment(ticker, news)
+            return f"{profile}{sentiment}"
 
         if intent == "get_historical_stock_prices":
             period   = args.get("period", "1mo")
