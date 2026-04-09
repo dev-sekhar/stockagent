@@ -29,7 +29,7 @@ from agents.ticker_resolver        import TickerResolverAgent
 from agents.company_search         import CompanySearchAgent
 from tools.polygon_search          import PolygonSearchAgent
 from agents.candidate_filter       import CandidateFilterAgent
-from agents.exchange_disambiguator import ExchangeDisambiguatorAgent, _normalise_name
+from agents.exchange_disambiguator import ExchangeDisambiguatorAgent
 from agents.current_price          import CurrentPriceAgent
 from agents.historical_price       import HistoricalPriceAgent
 from agents.date_range             import DateRangeAgent
@@ -347,55 +347,6 @@ class Orchestrator:
             if s != current_suffix
         ]
 
-    @staticmethod
-    def _pick_company(companies: list) -> list:
-        """
-        Given the raw list of companies from CompanySearchAgent, group them by
-        normalised name (so "Infosys Limited", "Infosys Limited ADR", and
-        "Infosys Limited (GDR)" all collapse into ONE group).
-
-        • If only one distinct company remains → return *all* companies (proceed as normal).
-        • If several distinct companies → show a numbered menu and let the user
-          pick one.  Only the companies from the selected group are returned, so
-          the subsequent ticker-search loop focuses on the chosen company.
-        """
-        # Build groups: normalised_name → [company_dict, …]
-        groups: dict[str, list] = {}
-        rep_names: dict[str, str] = {}   # normalised → cleanest display name
-        for c in companies:
-            key = _normalise_name(c.get("name", ""))
-            if key not in groups:
-                groups[key] = []
-                # Keep the shortest (least cluttered) name as the display label
-                rep_names[key] = c["name"]
-            else:
-                if len(c["name"]) < len(rep_names[key]):
-                    rep_names[key] = c["name"]
-            groups[key].append(c)
-
-        distinct_keys = list(groups.keys())
-
-        if len(distinct_keys) <= 1:
-            return companies  # nothing to disambiguate
-
-        # Multiple distinct companies — ask the user
-        print("\n  🔎 [Orchestrator] Multiple companies found — please choose one:\n")
-        for i, key in enumerate(distinct_keys, start=1):
-            print(f"    {i}. {rep_names[key]}")
-        print()
-
-        while True:
-            try:
-                raw = input("  Enter number: ").strip()
-                choice = int(raw)
-                if 1 <= choice <= len(distinct_keys):
-                    selected_key = distinct_keys[choice - 1]
-                    print(f"  ✅ Selected: {rep_names[selected_key]}\n")
-                    return groups[selected_key]
-                print(f"  ⚠️  Please enter a number between 1 and {len(distinct_keys)}.")
-            except (ValueError, EOFError):
-                print("  ⚠️  Invalid input — please try again.")
-
     def _resolve(self, company_or_ticker: str) -> str:
         """
         Return a verified ticker symbol.
@@ -475,15 +426,6 @@ class Orchestrator:
                 print(f"  ⚠️  [CompanySearch] {exc} → {diag['action']}: {diag['suggestion']}")
         else:
             print("  ⚠️  [CompanySearch] circuit OPEN — skipping web search, using yfinance only")
-
-        # ── Step B.5: company disambiguation ──────────────────────────────────
-        # If CompanySearchAgent found multiple DISTINCT companies (e.g. "Infosys
-        # Limited" vs "Infosys BPM Limited"), ask the user to pick one before we
-        # do any ticker searches.  Variants of the same company ("Infosys Limited
-        # ADR", "Infosys Limited (GDR)") are collapsed into a single entry so the
-        # user only sees truly distinct choices.
-        if companies:
-            companies = self._pick_company(companies)
 
         for company in companies:
             hint = company.get("ticker_hint")

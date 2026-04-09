@@ -15,7 +15,7 @@ User query
     ▼
 Orchestrator          ← LLM classifies intent via ROUTING_TOOLS, extracts entities
     │
-    ├─ ExchangeDisambiguatorAgent  ← company name → verified ticker (LLM + interactive menu)
+    ├─ ExchangeDisambiguatorAgent  ← company name → verified ticker (LLM + ask_user tool)
     ├─ TickerResolverAgent         ← simpler ticker lookup via search_ticker tool
     │
     ├─ CurrentPriceAgent           ← latest traded price
@@ -153,6 +153,44 @@ supervisor.register("AgentName", failure_threshold=3, recovery_timeout=60)
 Circuit states: `CLOSED` → `OPEN` (after N failures) → `HALF_OPEN` (probe) → `CLOSED`.
 Error actions: `wait_retry` | `try_variant` | `use_fallback` | `abort`.
 
+### 7. Agent Clarification Pattern (ask_user tool)
+
+**Rule: agents must never use hardcoded Python menus or `if len > 1` branching to ask the user questions.  All interactive prompts must go through the `ask_user` tool so the LLM decides *when* and *what* to ask.**
+
+When an agent might need user input to resolve ambiguity (e.g. multiple matching companies, multiple exchange listings), give it the `ask_user` tool and instruct the LLM in the system prompt to call it.
+
+```python
+from tools.ask_user_tool import ask_user, TOOL_DEFINITION as ASK_USER_TOOL
+
+class MyAgent(BaseAgent):
+    system_prompt = """
+    ...your task description...
+
+    When you detect genuine ambiguity that cannot be resolved automatically,
+    call ask_user with a clear question and a list of options.
+    When fully resolved, return only the final answer — no prose.
+    """
+    tools       = [ASK_USER_TOOL]
+    tool_fn_map = {"ask_user": ask_user}
+```
+
+The `ask_user` tool:
+- Accepts `question` (required) and `options` (optional list of labelled choices)
+- Displays the question, collects the user's numbered selection or free-form text
+- Returns `{"answer": <chosen_label>, "index": <0-based int | null>}`
+- The LLM receives the answer as a tool result and continues reasoning
+
+**When to call ask_user (LLM decides, via system prompt instructions):**
+- Multiple distinct companies match a query
+- One company is listed on multiple exchanges
+- Any other case where two valid options exist and the user's preference is unknown
+
+**When NOT to call ask_user:**
+- Only one option exists — auto-select silently
+- One option is overwhelmingly the standard choice for the query (e.g. a well-known US company with a single US listing)
+
+**The Orchestrator must not replicate this logic.**  Pass all candidates to the agent and let the agent's LLM tool loop handle all ambiguity.
+
 ## File Structure
 
 ```
@@ -189,7 +227,8 @@ stock-agent/
     ├── company_data.py      # CompanyDataTool — yfinance profile + fundamentals
     ├── data_validator.py    # DataValidator — deterministic OHLC validation
     ├── polygon_search.py    # PolygonSearchAgent — Polygon.io HTTP wrapper
-    └── industry_index.py    # Sector lookup table (no LLM; use sector_index.py instead)
+    ├── industry_index.py    # Sector lookup table (no LLM; use sector_index.py instead)
+    └── ask_user_tool.py     # ask_user() + TOOL_DEFINITION — LLM-driven user prompts
 ```
 
 ## Tech Stack
@@ -206,12 +245,12 @@ stock-agent/
 
 ## Conventions
 
-- **Temperature**: always `0.1` for reasoning agents; `0.0` for structured-JSON-only responses (e.g., `ExchangeDisambiguatorAgent`).
+- **Temperature**: always `0.1` for reasoning agents; `0.0` for structured-JSON-only responses.
 - **Max tokens**: `4096` for agents, `128` for classification/JSON calls.
 - **Tool definitions**: defined alongside their implementing function in `tools/`, imported into agents.
 - **System prompts**: defined as class-level strings on each `BaseAgent` subclass.
 - **Groq client**: constructed once in `main.py` / `Orchestrator.__init__()` and passed by dependency injection.
-- **Interactive prompts**: only in `ExchangeDisambiguatorAgent` and `main.py`; all other agents are headless.
+- **Interactive prompts**: use the `ask_user` tool — never raw `input()` or hardcoded menus inside agents.  The only permitted raw `input()` call is in `main.py` (the top-level REPL).
 - **Output files**: interactive HTML charts are written to the project root and opened in the browser automatically.
 - **No hardcoded API keys**: always load from environment via `python-dotenv`.
 
