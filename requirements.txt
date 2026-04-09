@@ -1,0 +1,8 @@
+groq
+yfinance
+python-dotenv
+pandas
+tabulate
+requests
+matplotlib
+plotly
