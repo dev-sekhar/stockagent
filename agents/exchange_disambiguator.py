@@ -43,13 +43,18 @@ Return ONLY valid JSON — no prose, no markdown.
 
 
 def _normalise_name(name: str) -> str:
-    """Lower-case, strip legal suffixes and ADR/listing tags for fuzzy comparison."""
+    """Lower-case, strip legal suffixes, ADR/listing tags, and parenthetical
+    qualifiers for fuzzy company-identity comparison."""
     name = name.lower()
+    # Strip anything in parentheses — always a qualifier, never core identity:
+    # "(Old)", "(GDR)", "(ADR)", "(NS)", "(Formerly XYZ)" etc.
+    name = re.sub(r"\(.*?\)", "", name)
     for suffix in (
         "limited", "ltd", "inc", "corp", "plc", "llc", "n.v.", "s.a.", "ag",
-        # ADR / depositary-receipt tags that Polygon appends — must be stripped
-        # so "Infosys Limited ADR" groups with "Infosys Limited" as one company.
+        # ADR / depositary-receipt listing tags
         "adr", "adrc", "ads", "sponsored adr", "unsponsored adr",
+        # Historical naming variants (e.g. Infosys → Infosys Technologies)
+        "technologies", "technology",
     ):
         name = re.sub(rf"\b{re.escape(suffix)}\b\.?", "", name)
     return re.sub(r"\s+", " ", name).strip()
@@ -86,10 +91,12 @@ class ExchangeDisambiguatorAgent:
         Raises ValueError if candidates list is empty or user cancels.
 
         Pipeline:
-          1. Group by company name
-          2. If single company: try LLM auto-select exchange; else ask
-          3. If multiple companies: try LLM to identify obvious winner;
-             else present interactive menu
+          1. Group by normalised company name
+          2. If single company → deduplicate by exchange, show menu if >1 exchange
+          3. If multiple companies → LLM identifies the obvious one:
+               a. If that company has multiple exchange listings → show exchange menu
+               b. If only one listing → return it directly
+               c. If ambiguous → interactive company menu
         """
         if not candidates:
             raise ValueError(f"No listings found for '{query}'")
@@ -102,12 +109,27 @@ class ExchangeDisambiguatorAgent:
                 query, list(company_groups.values())[0]
             )
         else:
-            # Try LLM auto-select before showing interactive menu
+            # LLM identifies the most obvious company match
             if self._client:
                 auto = self._llm_auto_select(query, candidates)
                 if auto:
-                    print(f"  🤖 [ExchangeDisambiguatorAgent] Auto-selected → {auto}")
-                    return auto
+                    # Find the group the auto-selected ticker belongs to
+                    group = self._find_group_for_ticker(auto, company_groups)
+                    if group:
+                        exchanges = self._best_per_exchange(group)
+                        if len(exchanges) > 1:
+                            # Same company on multiple exchanges — let the user pick
+                            company_name = group[0]["name"]
+                            print(
+                                f"  🤖 [ExchangeDisambiguatorAgent] "
+                                f"'{company_name}' identified — found on "
+                                f"{len(exchanges)} exchange(s), please choose:"
+                            )
+                            return self._ask_exchange(company_name, exchanges)
+                        else:
+                            # Only one listing — safe to auto-pick
+                            print(f"  🤖 [ExchangeDisambiguatorAgent] Auto-selected → {auto}")
+                            return auto
             return self._resolve_multiple_companies(query, company_groups)
 
     # ── grouping ──────────────────────────────────────────────────────────────
@@ -128,6 +150,14 @@ class ExchangeDisambiguatorAgent:
             groups[key].sort(key=lambda c: 0 if c.get("type", "").upper() == "EQUITY" else 1)
 
         return groups
+
+    @staticmethod
+    def _find_group_for_ticker(ticker: str, company_groups: dict) -> list | None:
+        """Return the candidate list whose group contains *ticker*, or None."""
+        for group in company_groups.values():
+            if any(c["ticker"].upper() == ticker.upper() for c in group):
+                return group
+        return None
 
     # ── LLM auto-selection ────────────────────────────────────────────────────
 
