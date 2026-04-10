@@ -16,6 +16,7 @@ import math
 from typing import Any, Dict, List, Optional
 
 from groq import Groq
+from config import LLM_MODEL, TEMP_REASON, TOKENS_PROFILE
 
 from agents.base_agent import BaseAgent
 
@@ -113,7 +114,7 @@ class CompanyProfileAgent(BaseAgent):
       report  = agent.summarise("INFY.NS", company_data, news)
     """
 
-    model = "llama-3.3-70b-versatile"
+    model = LLM_MODEL
     tools = []   # One-shot — no tool-calling loop
 
     def summarise(
@@ -159,8 +160,8 @@ class CompanyProfileAgent(BaseAgent):
                         "content": json.dumps(payload, default=_json_safe),
                     },
                 ],
-                max_tokens=1600,
-                temperature=0.1,
+                max_tokens=TOKENS_PROFILE,
+                temperature=TEMP_REASON,
             )
             return (resp.choices[0].message.content or "").strip()
         except Exception:

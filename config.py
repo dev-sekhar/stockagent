@@ -62,3 +62,17 @@ GOOGLE_NEWS_URL = os.getenv(
     "https://news.google.com/rss/search",
 )
 RSS_TIMEOUT = int(os.getenv("RSS_TIMEOUT", "8"))  # seconds per request
+
+# ── Access Gateway — external service kill-switches ───────────────────────────
+# Set any of these to "false" (case-insensitive) to block that category of
+# outbound call.  Useful for offline testing or compliance restrictions.
+def _bool_env(key: str, default: bool = True) -> bool:
+    val = os.getenv(key, "")
+    if not val:
+        return default
+    return val.strip().lower() not in ("0", "false", "no", "off")
+
+GATEWAY_LLM_ENABLED         = _bool_env("GATEWAY_LLM_ENABLED",         True)
+GATEWAY_MARKET_DATA_ENABLED = _bool_env("GATEWAY_MARKET_DATA_ENABLED",  True)
+GATEWAY_POLYGON_ENABLED     = _bool_env("GATEWAY_POLYGON_ENABLED",      True)
+GATEWAY_NEWS_RSS_ENABLED    = _bool_env("GATEWAY_NEWS_RSS_ENABLED",      True)

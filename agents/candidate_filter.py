@@ -20,6 +20,7 @@ of alternative search strings to try (empty list if none needed).
 """
 import re
 from groq import Groq
+from config import LLM_MODEL, TEMP_STRUCT, TOKENS_SEARCH
 
 _STOP_WORDS = {
     "the", "of", "and", "in", "for", "to", "a", "an", "on",
@@ -79,7 +80,7 @@ class CandidateFilterAgent:
     """
 
     MIN_KEEP = 2      # below this, trigger LLM review
-    MODEL    = "llama-3.3-70b-versatile"
+    MODEL    = LLM_MODEL
 
     def __init__(self, client: Groq):
         self.client = client
@@ -156,8 +157,8 @@ class CandidateFilterAgent:
                         ),
                     },
                 ],
-                max_tokens=512,
-                temperature=0.0,
+                max_tokens=TOKENS_SEARCH,
+                temperature=TEMP_STRUCT,
             )
             content = resp.choices[0].message.content or ""
             match = re.search(r"\{.*\}", content, re.DOTALL)

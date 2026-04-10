@@ -17,6 +17,7 @@ Add POLYGON_API_KEY to your .env file.
 """
 import os
 import requests
+from tools.access_gateway import gateway
 
 _POLYGON_BASE = "https://api.polygon.io/v3/reference/tickers"
 
@@ -49,6 +50,7 @@ class PolygonSearchAgent:
         Returns empty list on error (caller should fall back to yfinance search).
         """
         try:
+            gateway.check("POLYGON")
             params = {
                 "search":   query,
                 "active":   "true",

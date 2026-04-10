@@ -26,6 +26,7 @@ from typing import List, Dict
 
 import requests
 from config import YAHOO_RSS_URL, GOOGLE_NEWS_URL, RSS_TIMEOUT
+from tools.access_gateway import gateway
 
 _TIMEOUT = RSS_TIMEOUT
 
@@ -90,6 +91,7 @@ def fetch_yahoo_rss(ticker: str, max_items: int = 20) -> List[Dict]:
         f"?s={base_ticker}&region=US&lang=en-US"
     )
     try:
+        gateway.check("NEWS_RSS")
         resp = requests.get(url, timeout=_TIMEOUT)
         resp.raise_for_status()
         return _items_from_xml(resp.text)[:max_items]
@@ -110,6 +112,7 @@ def fetch_google_news_rss(query: str, max_items: int = 20) -> List[Dict]:
         f"?q={requests.utils.quote(query)}&hl=en-US&gl=US&ceid=US:en"
     )
     try:
+        gateway.check("NEWS_RSS")
         resp = requests.get(url, timeout=_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
         items = _items_from_xml(resp.text)

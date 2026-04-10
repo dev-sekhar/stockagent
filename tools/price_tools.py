@@ -3,6 +3,7 @@ Single-purpose tool: fetch the latest traded price for a stock ticker.
 """
 import yfinance as yf
 from tools.data_validator  import DataValidator
+from tools.access_gateway  import gateway
 
 _validator = DataValidator()
 
@@ -28,6 +29,7 @@ TOOL_DEFINITION = {
 def get_current_price(ticker: str) -> dict:
     """Return last traded price, change, change%, volume, and trade date."""
     try:
+        gateway.check("MARKET_DATA")
         t = yf.Ticker(ticker.upper())
         hist = t.history(period="2d")
         if hist.empty:

@@ -6,6 +6,7 @@ Single-purpose tools: fetch historical OHLCV data for a ticker.
 import yfinance as yf
 from tabulate import tabulate
 from tools.data_validator  import DataValidator
+from tools.access_gateway  import gateway
 
 _validator = DataValidator()
 
@@ -117,6 +118,7 @@ def _summarise(rows: list, ticker: str, period: str) -> dict:
 
 def get_historical_prices(ticker: str, period: str = "1mo", interval: str = "1d") -> dict:
     try:
+        gateway.check("MARKET_DATA")
         hist = yf.Ticker(ticker.upper()).history(period=period, interval=interval)
         if hist.empty:
             return {"error": f"No historical data for {ticker} (period={period})"}
@@ -143,6 +145,7 @@ def get_historical_prices(ticker: str, period: str = "1mo", interval: str = "1d"
 
 def get_price_range_between_dates(ticker: str, start: str, end: str) -> dict:
     try:
+        gateway.check("MARKET_DATA")
         hist = yf.Ticker(ticker.upper()).history(start=start, end=end, interval="1d")
         if hist.empty:
             return {"error": f"No data for {ticker} between {start} and {end}"}

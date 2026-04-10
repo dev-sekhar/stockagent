@@ -30,6 +30,7 @@ from typing import Any, Dict, List
 
 import yfinance as yf
 from groq import Groq
+from config import LLM_MODEL, TEMP_REASON, TOKENS_NEWS
 
 from agents.base_agent import BaseAgent
 from tools.news_rss import fetch_yahoo_rss, fetch_google_news_rss
@@ -107,7 +108,7 @@ class NewsAgent(BaseAgent):
     yfinance before the LLM is invoked).
     """
 
-    model = "llama-3.3-70b-versatile"
+    model = LLM_MODEL
     tools = []   # No tool loop needed for news curation
 
     def fetch(self, ticker: str, max_raw: int = 25) -> List[Dict[str, Any]]:
@@ -225,8 +226,8 @@ class NewsAgent(BaseAgent):
                         ),
                     },
                 ],
-                max_tokens=1200,
-                temperature=0.1,
+                max_tokens=TOKENS_NEWS,
+                temperature=TEMP_REASON,
             )
             text  = (resp.choices[0].message.content or "").strip()
             match = re.search(r"\[.*\]", text, re.DOTALL)

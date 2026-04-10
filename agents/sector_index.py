@@ -16,6 +16,7 @@ Resolution order:
 import re
 import yfinance as yf
 from groq import Groq
+from config import LLM_MODEL, TEMP_STRUCT, TOKENS_SECTOR
 
 # ── Sector index map ──────────────────────────────────────────────────────────
 # Structure: sector_key → [(exchange_suffix, index_ticker, index_label), ...]
@@ -187,7 +188,7 @@ class SectorIndexAgent:
     to reason about the correct sector mapping from the yfinance metadata.
     """
 
-    MODEL = "llama-3.3-70b-versatile"
+    MODEL = LLM_MODEL
 
     def __init__(self, groq_client: Groq | None = None):
         self._client = groq_client
@@ -269,8 +270,8 @@ class SectorIndexAgent:
                      "Reply with exactly ONE key from the provided list, or 'none'."},
                     {"role": "user", "content": prompt},
                 ],
-                max_tokens=32,
-                temperature=0.0,
+                max_tokens=TOKENS_SECTOR,
+                temperature=TEMP_STRUCT,
             )
             answer = (resp.choices[0].message.content or "").strip().lower()
             # Strip punctuation / quotes the model might add

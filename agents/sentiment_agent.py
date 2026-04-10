@@ -42,8 +42,9 @@ import yfinance as yf
 from groq import Groq
 
 from agents.base_agent import BaseAgent
+from config import LLM_MODEL, TEMP_REASON, TOKENS_SENTIMENT
 
-_MODEL = "llama-3.3-70b-versatile"
+_MODEL = LLM_MODEL
 
 _SYSTEM = """\
 You are a financial sentiment analyst and short-term market strategist.
@@ -177,8 +178,8 @@ class SentimentAgent(BaseAgent):
                     {"role": "system", "content": _SYSTEM},
                     {"role": "user",   "content": user_msg},
                 ],
-                max_tokens=1024,
-                temperature=0.1,
+                max_tokens=TOKENS_SENTIMENT,
+                temperature=TEMP_REASON,
             )
             text  = (resp.choices[0].message.content or "").strip()
             match = re.search(r"\{.*\}", text, re.DOTALL)

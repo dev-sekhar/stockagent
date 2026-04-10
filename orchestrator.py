@@ -40,7 +40,16 @@ from agents.sentiment_agent        import SentimentAgent
 from agents.company_profile        import CompanyProfileAgent
 from tools.company_data            import CompanyDataTool
 
-MODEL = "llama-3.3-70b-versatile"
+from config import (
+    LLM_MODEL, TEMP_STRUCT, TOKENS_CLASSIFY,
+    GROQ_RPM,
+    CB_FAILURE_THRESHOLD, CB_RECOVERY_TIMEOUT,
+    CB_RECOVERY_POLYGON, CB_RECOVERY_PRICE,
+    DEFAULT_BENCHMARK, DEFAULT_BENCHMARK_NAME,
+)
+from tools.access_gateway import gateway
+
+MODEL = LLM_MODEL
 
 # ── Orchestration tool definitions ───────────────────────────────────────────
 # These are "meta-tools": the LLM uses them to declare intent + extract params.
@@ -248,7 +257,7 @@ class RateLimiter:
             self._timestamps.append(time.time())
 
 
-_rate_limiter = RateLimiter(calls_per_minute=30)
+_rate_limiter = RateLimiter(calls_per_minute=GROQ_RPM)
 
 
 # ── Retry helper ──────────────────────────────────────────────────────────────
@@ -319,14 +328,14 @@ class Orchestrator:
         # ── Self-Healing Supervisor ───────────────────────────────────────────
         self.supervisor = (
             SelfHealingSupervisor(self.client)
-            .register("Polygon",        failure_threshold=3, recovery_timeout=120)
-            .register("CompanySearch",  failure_threshold=3, recovery_timeout=60)
-            .register("CurrentPrice",   failure_threshold=3, recovery_timeout=90)
-            .register("HistoricalPrice",failure_threshold=3, recovery_timeout=90)
-            .register("DateRange",      failure_threshold=3, recovery_timeout=90)
-            .register("ChartAgent",     failure_threshold=2, recovery_timeout=60)
-            .register("CompanyData",    failure_threshold=2, recovery_timeout=60)
-            .register("NewsAgent",      failure_threshold=2, recovery_timeout=60)
+            .register("Polygon",        failure_threshold=CB_FAILURE_THRESHOLD, recovery_timeout=CB_RECOVERY_POLYGON)
+            .register("CompanySearch",  failure_threshold=CB_FAILURE_THRESHOLD, recovery_timeout=CB_RECOVERY_TIMEOUT)
+            .register("CurrentPrice",   failure_threshold=CB_FAILURE_THRESHOLD, recovery_timeout=CB_RECOVERY_PRICE)
+            .register("HistoricalPrice",failure_threshold=CB_FAILURE_THRESHOLD, recovery_timeout=CB_RECOVERY_PRICE)
+            .register("DateRange",      failure_threshold=CB_FAILURE_THRESHOLD, recovery_timeout=CB_RECOVERY_PRICE)
+            .register("ChartAgent",     failure_threshold=max(1, CB_FAILURE_THRESHOLD - 1), recovery_timeout=CB_RECOVERY_TIMEOUT)
+            .register("CompanyData",    failure_threshold=max(1, CB_FAILURE_THRESHOLD - 1), recovery_timeout=CB_RECOVERY_TIMEOUT)
+            .register("NewsAgent",      failure_threshold=max(1, CB_FAILURE_THRESHOLD - 1), recovery_timeout=CB_RECOVERY_TIMEOUT)
         )
 
     # ── internal helpers ─────────────────────────────────────────────────────
@@ -582,51 +591,91 @@ class Orchestrator:
             print("  Please enter 1 or 2.")
 
     @staticmethod
-    def _clarify_intent(ticker: str, intent: str, args: dict) -> tuple[str, dict]:
+    def _clarify_intent(ticker: str, intent: str, args: dict) -> list[tuple[str, dict]]:
         """
         Called when the user's query had no explicit price/time keywords.
-        Presents a short menu and returns the updated (intent, args).
+
+        Presents a multi-select menu.  Users may enter a single choice (e.g. "1")
+        or a comma-separated combination (e.g. "1,4" or "3,4,5").
+
+        Rules
+        -----
+        - Options 1/2/3/4 can be freely combined.
+        - Option 5 (compare) must be selected alone.
+        - If only 1, 2, or 3 are selected, company info / news / financials
+          are NOT fetched.
+        - Options 2 and 3 collect their required parameters (period/dates/format)
+          before the list is returned.
+
+        Returns a list of (intent, args) pairs to execute in order.
         """
         print(f"\n  ❓ [Orchestrator] What would you like for {ticker}?\n")
         print(f"    1.  Current / latest price")
         print(f"    2.  Historical data  (relative period — e.g. last 1 month)")
         print(f"    3.  Price between two dates")
         print(f"    4.  Company information & news  (profile, financials, headlines)")
-        print(f"    5.  Compare with another stock")
+        print(f"    5.  Compare with another stock  (must be selected alone)")
+        print(f"\n  Tip: enter a single number or combine with commas, e.g. 1,4 or 3,4,5")
 
         while True:
             try:
-                choice = input("\n  Enter 1–5: ").strip()
+                raw = input("\n  Enter choice(s): ").strip()
             except (EOFError, KeyboardInterrupt):
                 raise ValueError("Cancelled by user")
 
-            if choice == "1":
-                return "get_current_stock_price", args
+            # Parse comma-separated numbers
+            try:
+                choices = sorted({int(c.strip()) for c in raw.split(",") if c.strip()})
+            except ValueError:
+                print("  ⚠️  Please enter numbers separated by commas, e.g. 1 or 1,4.")
+                continue
 
-            if choice == "2":
+            if not choices or any(c not in (1, 2, 3, 4, 5) for c in choices):
+                print("  ⚠️  Valid options are 1, 2, 3, 4, 5.")
+                continue
+
+            if 5 in choices and len(choices) > 1:
+                print("  ⚠️  Option 5 (Compare) must be selected on its own.")
+                continue
+
+            # Option 5 — handled separately, return early
+            if choices == [5]:
+                return [("compare", args)]
+
+            # Collect params for option 2 (historical) if selected
+            hist_intent = None
+            hist_args: dict = {}
+            if 2 in choices:
                 period = input(
                     "  Period (1d 5d 1mo 3mo 6mo 1y 2y 5y 10y ytd max) [default: 1mo]: "
                 ).strip() or "1mo"
-                fmt  = Orchestrator._ask_output_format()
-                args = {**args, "period": period, "interval": "1d", "output_format": fmt}
-                intent = "chart_historical" if fmt == "chart" else "get_historical_stock_prices"
-                return intent, args
+                fmt = Orchestrator._ask_output_format()
+                hist_args = {**args, "period": period, "interval": "1d", "output_format": fmt}
+                hist_intent = "chart_historical" if fmt == "chart" else "get_historical_stock_prices"
 
-            if choice == "3":
+            # Collect params for option 3 (date range) if selected
+            range_intent = None
+            range_args: dict = {}
+            if 3 in choices:
                 start = input("  Start date (YYYY-MM-DD): ").strip()
                 end   = input("  End date   (YYYY-MM-DD): ").strip()
                 fmt   = Orchestrator._ask_output_format()
-                args  = {**args, "start": start, "end": end, "output_format": fmt}
-                intent = "chart_date_range" if fmt == "chart" else "get_stock_prices_between_dates"
-                return intent, args
+                range_args = {**args, "start": start, "end": end, "output_format": fmt}
+                range_intent = "chart_date_range" if fmt == "chart" else "get_stock_prices_between_dates"
 
-            if choice == "4":
-                return "get_company_info", args
+            # Build ordered action list
+            actions: list[tuple[str, dict]] = []
+            for c in choices:
+                if c == 1:
+                    actions.append(("get_current_stock_price", args))
+                elif c == 2 and hist_intent:
+                    actions.append((hist_intent, hist_args))
+                elif c == 3 and range_intent:
+                    actions.append((range_intent, range_args))
+                elif c == 4:
+                    actions.append(("get_company_info", args))
 
-            if choice == "5":
-                return "compare", args
-
-            print("  Please enter 1, 2, 3, 4, or 5.")
+            return actions
 
     # ── public entry point ───────────────────────────────────────────────────
 
@@ -699,6 +748,7 @@ class Orchestrator:
             return self._run_comparison()
 
         # Step 1 – intent classification + entity extraction
+        gateway.check("LLM")
         resp = self.client.chat.completions.create(
             model=MODEL,
             messages=[
@@ -707,8 +757,8 @@ class Orchestrator:
             ],
             tools=ROUTING_TOOLS,
             tool_choice="required",
-            max_tokens=256,
-            temperature=0.0,
+            max_tokens=TOKENS_CLASSIFY,
+            temperature=TEMP_STRUCT,
         )
 
         msg = resp.choices[0].message
@@ -727,24 +777,54 @@ class Orchestrator:
         # Both price/time words AND company-info phrases are checked.
         # A bare name like "apple" has neither → always shows the menu.
         if not _query_has_explicit_intent(user_query):
-            intent, args = self._clarify_intent(ticker, intent, args)
+            actions = self._clarify_intent(ticker, intent, args)
+        else:
+            actions = [(intent, args)]
 
-        if intent == "compare":
+        # Handle compare (must be alone)
+        if len(actions) == 1 and actions[0][0] == "compare":
             return self._run_comparison(initial_tickers=[ticker])
 
-        # Step 4 – delegate with circuit-breaker + fallback chains
+        # Step 4 – pre-fetch company snapshot once if any action needs it.
+        # Only options that explicitly request company info trigger the fetch.
+        _COMPANY_INTENTS = {"get_company_info", "chart_historical", "chart_date_range"}
+        needs_snapshot   = any(a[0] in _COMPANY_INTENTS for a in actions)
+
+        company_data: dict = {}
+        news: list         = []
+        if needs_snapshot:
+            company_data, news = self._fetch_company_snapshot(ticker)
+
+        # Step 5 – execute each action and collect results
+        results: list[str] = []
+        for action_intent, action_args in actions:
+            result = self._execute_intent(action_intent, action_args, ticker, company_data, news)
+            if result:
+                results.append(result)
+
+        return "\n\n---\n\n".join(results) if results else f"No data returned for {ticker}."
+
+    def _execute_intent(
+        self,
+        intent: str,
+        args: dict,
+        ticker: str,
+        company_data: dict,
+        news: list,
+    ) -> str:
+        """Execute a single resolved intent and return its result string."""
         sup = self.supervisor
 
         if intent == "get_current_stock_price":
             print(f"  📊 [CurrentPriceAgent] Fetching latest price for {ticker}…")
             try:
-                price_text = _with_retry(
+                return _with_retry(
                     sup.call, "CurrentPrice", self.current_agent.fetch, ticker,
                     supervisor=sup, agent_name="CurrentPrice",
                 )
             except CircuitOpenError:
                 print("  🔄 [Supervisor] CurrentPrice circuit OPEN → falling back to last close")
-                price_text = _with_retry(
+                return _with_retry(
                     sup.call, "HistoricalPrice", self.historical_agent.fetch, ticker,
                     period="5d",
                     supervisor=sup, agent_name="HistoricalPrice",
@@ -752,18 +832,8 @@ class Orchestrator:
             except Exception as exc:
                 return self._heal_and_retry(intent, ticker, exc, args)
 
-            # Enrich with company snapshot + news + sentiment
-            print(f"  🏢 [CompanyProfileAgent] Fetching company snapshot for {ticker}…")
-            company_data, news = self._fetch_company_snapshot(ticker)
-            if company_data and not company_data.get("error"):
-                profile   = self.company_profile_agent.summarise(ticker, company_data, news)
-                sentiment = self._fetch_sentiment(ticker, news)
-                return f"{price_text}\n\n---\n\n{profile}{sentiment}"
-            return price_text
-
         if intent == "get_company_info":
             print(f"  🏢 [CompanyProfileAgent] Fetching full company snapshot for {ticker}…")
-            company_data, news = self._fetch_company_snapshot(ticker)
             profile   = self.company_profile_agent.summarise(ticker, company_data, news)
             sentiment = self._fetch_sentiment(ticker, news)
             return f"{profile}{sentiment}"
@@ -808,7 +878,6 @@ class Orchestrator:
             period   = args.get("period", "1mo")
             interval = args.get("interval", "1d")
             print(f"  📊 [ChartAgent] Rendering chart for {ticker} ({period})…")
-            company_data, news = self._fetch_company_snapshot(ticker)
             try:
                 return sup.call(
                     "ChartAgent", self.chart_agent.plot,
@@ -837,7 +906,6 @@ class Orchestrator:
             start = args["start"]
             end   = args["end"]
             print(f"  📊 [ChartAgent] Rendering chart for {ticker} ({start} → {end})…")
-            company_data, news = self._fetch_company_snapshot(ticker)
             try:
                 return sup.call(
                     "ChartAgent", self.chart_agent.plot,

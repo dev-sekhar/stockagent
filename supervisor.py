@@ -44,6 +44,8 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 from groq import Groq
+from config import LLM_MODEL, TEMP_STRUCT, TOKENS_DIAGNOSE
+from tools.access_gateway import gateway
 
 
 # ── Circuit-breaker state ─────────────────────────────────────────────────────
@@ -313,8 +315,9 @@ class SelfHealingSupervisor:
 
         # ── LLM path ──────────────────────────────────────────────────────────
         try:
+            gateway.check("LLM")
             resp = self.client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=LLM_MODEL,
                 messages=[
                     {
                         "role": "system",
@@ -335,8 +338,8 @@ class SelfHealingSupervisor:
                         ),
                     },
                 ],
-                max_tokens=200,
-                temperature=0.0,
+                max_tokens=TOKENS_DIAGNOSE,
+                temperature=TEMP_STRUCT,
             )
             text  = (resp.choices[0].message.content or "").strip()
             match = re.search(r"\{.*?\}", text, re.DOTALL)

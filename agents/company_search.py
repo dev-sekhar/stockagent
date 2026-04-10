@@ -13,8 +13,9 @@ so the rest of the pipeline always gets something to work with.
 import json
 import re
 from groq import Groq
+from config import LLM_MODEL, TEMP_STRUCT, TOKENS_SEARCH
 
-MODEL = "llama-3.3-70b-versatile"
+MODEL = LLM_MODEL
 
 _SYSTEM = """\
 You are a stock market expert. Given a company name, abbreviation, or industry term,
@@ -55,8 +56,8 @@ class CompanySearchAgent:
                     {"role": "system", "content": _SYSTEM},
                     {"role": "user",   "content": f"List all listed companies matching: '{query}'"},
                 ],
-                max_tokens=512,
-                temperature=0.0,
+                max_tokens=TOKENS_SEARCH,
+                temperature=TEMP_STRUCT,
             )
             content = response.choices[0].message.content or ""
 

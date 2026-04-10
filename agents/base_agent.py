@@ -8,13 +8,17 @@ Shared Groq tool-calling loop.  Subclasses only need to set:
 """
 import json
 from groq import Groq
+from config import LLM_MODEL, TEMP_REASON, TOKENS_AGENT
+from tools.access_gateway import gateway
 
 
 class BaseAgent:
-    model: str = "llama-3.3-70b-versatile"
+    model: str         = LLM_MODEL
+    temperature: float = TEMP_REASON
+    max_tokens: int    = TOKENS_AGENT
     system_prompt: str = "You are a helpful assistant."
-    tools: list = []
-    tool_fn_map: dict = {}
+    tools: list        = []
+    tool_fn_map: dict  = {}
 
     def __init__(self, client: Groq):
         self.client = client
@@ -27,13 +31,14 @@ class BaseAgent:
         ]
 
         while True:
+            gateway.check("LLM")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=self.tools or None,
                 tool_choice="auto" if self.tools else None,
-                max_tokens=4096,
-                temperature=0.1,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
             )
             msg = response.choices[0].message
 

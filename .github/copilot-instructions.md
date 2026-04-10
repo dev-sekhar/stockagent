@@ -191,7 +191,78 @@ The `ask_user` tool:
 
 **The Orchestrator must not replicate this logic.**  Pass all candidates to the agent and let the agent's LLM tool loop handle all ambiguity.
 
-## File Structure
+### 8. Multi-Select Intent Menu
+
+When `_clarify_intent` is called (bare company name, no explicit intent signal), users
+can enter **one or more options** separated by commas:
+
+```
+1   Current / latest price
+2   Historical data  (relative period)
+3   Price between two dates
+4   Company information & news
+5   Compare with another stock  (must be alone)
+```
+
+Examples: `1`, `1,4`, `3,4,5`, `2,4`
+
+**Rules enforced by `_clarify_intent`:**
+- Any combination of 1/2/3/4 is valid.
+- Option 5 must be entered alone.
+- If the selection contains **only** 1, 2, or 3, the company snapshot (profile, financials, news, sentiment) is **not fetched**.
+- Options 2 and 3 collect their parameters (period / date range / output format) once, before returning.
+- Returns `list[tuple[str, dict]]` — ordered action pairs consumed by `handle()`.
+
+**`handle()` pipeline for multi-select:**
+```python
+actions = self._clarify_intent(ticker, intent, args)
+needs_snapshot = any(a[0] in {"get_company_info","chart_historical","chart_date_range"} for a in actions)
+if needs_snapshot:
+    company_data, news = self._fetch_company_snapshot(ticker)
+for action_intent, action_args in actions:
+    results.append(self._execute_intent(action_intent, action_args, ticker, company_data, news))
+```
+
+When adding new intent types, add them to `_COMPANY_INTENTS` inside `handle()` if they
+require the company snapshot.
+
+### 9. Access Gateway — External Call Gatekeeper
+
+Every outbound network call **must** go through `tools/access_gateway.py`.
+
+```python
+from tools.access_gateway import gateway
+
+# Guard only (raises AccessDeniedError if disabled)
+gateway.check("MARKET_DATA")
+
+# Guard + execute + log
+result = gateway.call("MARKET_DATA", yf.Ticker, "AAPL")
+```
+
+**Categories:**
+
+| Category | Covers |
+|----------|--------|
+| `LLM` | Groq `chat.completions.create` in base_agent, orchestrator, supervisor |
+| `MARKET_DATA` | yfinance calls in price_tools, history_tools |
+| `POLYGON` | Polygon.io HTTP requests |
+| `NEWS_RSS` | Yahoo Finance & Google News RSS fetches |
+
+**Kill-switches** (env vars — default all enabled):
+```
+GATEWAY_LLM_ENABLED=false          # disables all Groq calls
+GATEWAY_MARKET_DATA_ENABLED=false  # disables yfinance
+GATEWAY_POLYGON_ENABLED=false      # disables Polygon search
+GATEWAY_NEWS_RSS_ENABLED=false     # disables RSS news feeds
+```
+
+**Rules:**
+- Import the module-level `gateway` singleton — do NOT instantiate a new `AccessGateway`.
+- Add a `gateway.check(category)` call at the top of every new function that makes an outbound network request.
+- `AccessDeniedError` is a `RuntimeError` subclass — callers may catch it to produce a graceful degradation message.
+- The gateway status is printed at startup: `🛡️  [AccessGateway] ✅ Groq LLM API | ✅ yfinance / market data | …`
+
 
 ```
 stock-agent/
@@ -228,7 +299,9 @@ stock-agent/
     ├── data_validator.py    # DataValidator — deterministic OHLC validation
     ├── polygon_search.py    # PolygonSearchAgent — Polygon.io HTTP wrapper
     ├── industry_index.py    # Sector lookup table (no LLM; use sector_index.py instead)
-    └── ask_user_tool.py     # ask_user() + TOOL_DEFINITION — LLM-driven user prompts
+    ├── news_rss.py          # Free RSS fallback for news (Yahoo Finance + Google News)
+    ├── ask_user_tool.py     # ask_user() + TOOL_DEFINITION — LLM-driven user prompts
+    └── access_gateway.py    # AccessGateway singleton — gatekeeper for all external calls
 ```
 
 ## Tech Stack
@@ -250,7 +323,8 @@ stock-agent/
 - **Tool definitions**: defined alongside their implementing function in `tools/`, imported into agents.
 - **System prompts**: defined as class-level strings on each `BaseAgent` subclass.
 - **Groq client**: constructed once in `main.py` / `Orchestrator.__init__()` and passed by dependency injection.
-- **Interactive prompts**: use the `ask_user` tool — never raw `input()` or hardcoded menus inside agents.  The only permitted raw `input()` call is in `main.py` (the top-level REPL).
+- **Interactive prompts**: use the `ask_user` tool — never raw `input()` or hardcoded menus inside agents.  The only permitted raw `input()` call is in `main.py` (the top-level REPL) and `orchestrator.py` (the clarify-intent menu).
+- **External calls**: all outbound network requests must call `gateway.check(category)` first (see Pattern 9).
 - **Output files**: interactive HTML charts are written to the project root and opened in the browser automatically.
 - **No hardcoded API keys**: always load from environment via `python-dotenv`.
 

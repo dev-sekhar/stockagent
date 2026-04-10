@@ -5,6 +5,7 @@ import os
 import sys
 from dotenv import load_dotenv
 from orchestrator import Orchestrator
+from tools.access_gateway import gateway
 
 load_dotenv()
 
@@ -34,6 +35,7 @@ def main():
     print("║  Type  health  to see agent health status.           ║")
     print("║  Type  exit    to quit.                              ║")
     print("╚══════════════════════════════════════════════════════╝\n")
+    print(gateway.report())
 
     while True:
         try:
