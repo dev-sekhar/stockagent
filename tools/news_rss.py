@@ -25,8 +25,9 @@ from email.utils import parsedate_to_datetime
 from typing import List, Dict
 
 import requests
+from config import YAHOO_RSS_URL, GOOGLE_NEWS_URL, RSS_TIMEOUT
 
-_TIMEOUT = 8  # seconds per request
+_TIMEOUT = RSS_TIMEOUT
 
 
 def _parse_rfc2822(date_str: str) -> int:
@@ -85,7 +86,7 @@ def fetch_yahoo_rss(ticker: str, max_items: int = 20) -> List[Dict]:
     # Strip exchange suffix for the RSS endpoint (it only knows base tickers)
     base_ticker = ticker.split(".")[0]
     url = (
-        f"https://feeds.finance.yahoo.com/rss/2.0/headline"
+        f"{YAHOO_RSS_URL}"
         f"?s={base_ticker}&region=US&lang=en-US"
     )
     try:
@@ -105,7 +106,7 @@ def fetch_google_news_rss(query: str, max_items: int = 20) -> List[Dict]:
     and source name are reliable but the link requires a browser redirect.
     """
     url = (
-        f"https://news.google.com/rss/search"
+        f"{GOOGLE_NEWS_URL}"
         f"?q={requests.utils.quote(query)}&hl=en-US&gl=US&ceid=US:en"
     )
     try:

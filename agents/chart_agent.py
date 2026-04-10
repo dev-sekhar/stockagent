@@ -22,6 +22,7 @@ from tools.stock_curve     import StockCurveTool
 from tools.index_curve     import IndexCurveTool
 from agents.sector_index   import SectorIndexAgent
 from tools.chart_compiler  import ChartCompiler
+from config import DEFAULT_BENCHMARK, DEFAULT_BENCHMARK_NAME
 
 # ── Exchange suffix → (broad-market index ticker, display name) ───────────────
 _EXCHANGE_INDEX: dict[str, tuple[str, str]] = {
@@ -39,7 +40,7 @@ _EXCHANGE_INDEX: dict[str, tuple[str, str]] = {
     ".SW":  ("^SSMI",   "SMI"),
     ".T":   ("^N225",   "Nikkei 225"),
 }
-_DEFAULT_INDEX = ("^GSPC", "S&P 500")
+_DEFAULT_INDEX = (DEFAULT_BENCHMARK, DEFAULT_BENCHMARK_NAME)
 
 
 def _detect_index(ticker: str) -> tuple[str, str]:
