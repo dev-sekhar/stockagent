@@ -154,20 +154,103 @@ ROUTING_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "chart_historical",
+            "description": (
+                "User wants an interactive chart for a stock over a relative period. "
+                "Triggered by 'chart', 'graph', 'plot', 'visualise', 'show chart'. "
+                "Use instead of get_historical_stock_prices when a chart is requested."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "company_or_ticker": {
+                        "type": "string",
+                        "description": "Company name or ticker symbol.",
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "yfinance period code: 1d 5d 1mo 3mo 6mo 1y 2y 5y 10y ytd max",
+                    },
+                    "interval": {
+                        "type": "string",
+                        "description": "Bar interval: 1d (default) 1wk 1mo",
+                        "default": "1d",
+                    },
+                },
+                "required": ["company_or_ticker", "period"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "chart_date_range",
+            "description": (
+                "User wants an interactive chart between specific start and end dates. "
+                "Triggered by 'chart', 'graph', 'plot' combined with explicit dates."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "company_or_ticker": {
+                        "type": "string",
+                        "description": "Company name or ticker symbol.",
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "Start date YYYY-MM-DD.",
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "End date YYYY-MM-DD.",
+                    },
+                },
+                "required": ["company_or_ticker", "start", "end"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare",
+            "description": (
+                "User wants to compare two or more stocks side-by-side. "
+                "Triggered by 'compare', 'vs', 'versus', 'against', 'side by side'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "company_or_ticker": {
+                        "type": "string",
+                        "description": "First company name or ticker symbol.",
+                    }
+                },
+                "required": ["company_or_ticker"],
+            },
+        },
+    },
 ]
 
 _SYSTEM = (
-    "You are a stock query router. Analyse the user's message and call exactly one tool:\n"
-    "  • get_current_stock_price         – for latest / current price requests\n"
-    "  • get_historical_stock_prices     – for relative-period requests (last month, ytd …)\n"
-    "  • get_stock_prices_between_dates  – for explicit start/end date requests\n"
-    "  • get_company_info                – for company profile, fundamentals, news, 'tell me about'\n"
+    "You are a stock query router. Analyse the user's message and call the appropriate tool(s).\n"
+    "Available tools:\n"
+    "  • get_current_stock_price         – latest / current price\n"
+    "  • get_historical_stock_prices     – relative-period TEXT data (last month, ytd …)\n"
+    "  • get_stock_prices_between_dates  – explicit start/end date TEXT data\n"
+    "  • get_company_info                – company profile, fundamentals, news\n"
+    "  • chart_historical                – interactive CHART for relative period\n"
+    "  • chart_date_range                – interactive CHART between specific dates\n"
+    "  • compare                         – side-by-side comparison of two or more stocks\n"
+    "For chart vs text: use chart_* tools when 'chart', 'graph', or 'plot' is mentioned; "
+    "otherwise use the text tools.\n"
     "CRITICAL: Extract the company name or ticker EXACTLY as the user typed it — "
     "do NOT expand, complete, guess, or add words to it. "
-    "If the user typed 'hindustan', pass 'hindustan'. "
-    "If the user typed 'hdfc', pass 'hdfc'. Never infer the full company name. "
     "Convert natural-language dates to YYYY-MM-DD. "
-    "Map natural-language periods to yfinance codes (e.g. 'last year' → '1y')."
+    "Map natural-language periods to yfinance codes (e.g. 'last year' → '1y').\n"
+    "You may call multiple tools if the user clearly wants multiple things."
 )
 
 
@@ -573,109 +656,76 @@ class Orchestrator:
 
     # ── intent clarification ─────────────────────────────────────────────────
 
-    @staticmethod
-    def _ask_output_format() -> str:
-        """Ask whether the user wants raw data (LLM narration) or a chart."""
-        print("\n  📊 How would you like the data?\n")
-        print("    1.  Summary / raw data  (text)")
-        print("    2.  Chart  (interactive HTML — opens in browser)")
-        while True:
-            try:
-                choice = input("\n  Enter 1 or 2: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                return "raw"
-            if choice == "1":
-                return "raw"
-            if choice == "2":
-                return "chart"
-            print("  Please enter 1 or 2.")
-
-    @staticmethod
-    def _clarify_intent(ticker: str, intent: str, args: dict) -> list[tuple[str, dict]]:
+    def _clarify_intent(self, ticker: str, intent: str, args: dict) -> list[tuple[str, dict]]:
         """
-        Called when the user's query had no explicit price/time keywords.
+        Called when the user's query had no explicit intent signal (bare name).
 
-        Presents a multi-select menu.  Users may enter a single choice (e.g. "1")
-        or a comma-separated combination (e.g. "1,4" or "3,4,5").
+        Asks the user a single free-form question; the LLM interprets their
+        response into one or more (intent, args) pairs using ROUTING_TOOLS.
 
-        Rules
-        -----
-        - Options 1/2/3/4 can be freely combined.
-        - Option 5 (compare) must be selected alone.
-        - If only 1, 2, or 3 are selected, company info / news / financials
-          are NOT fetched.
-        - Options 2 and 3 collect their required parameters (period/dates/format)
-          before the list is returned.
+        The user can respond with anything:
+          - numbers ("1", "1,4", "3,4")
+          - keywords ("price and news", "chart", "company profile")
+          - natural language ("show me a 3 month chart and the company profile")
 
-        Returns a list of (intent, args) pairs to execute in order.
+        The LLM resolves all of these — no hardcoded number-to-intent mapping.
         """
-        print(f"\n  ❓ [Orchestrator] What would you like for {ticker}?\n")
-        print(f"    1.  Current / latest price")
-        print(f"    2.  Historical data  (relative period — e.g. last 1 month)")
-        print(f"    3.  Price between two dates")
-        print(f"    4.  Company information & news  (profile, financials, headlines)")
-        print(f"    5.  Compare with another stock  (must be selected alone)")
-        print(f"\n  Tip: enter a single number or combine with commas, e.g. 1,4 or 3,4,5")
+        print(f"\n  ❓ [Orchestrator] What would you like for {ticker}?")
+        print(f"     (e.g. 'current price', 'price and news', '3mo chart', "
+              f"'1mo data and company info', 'compare')")
 
-        while True:
-            try:
-                raw = input("\n  Enter choice(s): ").strip()
-            except (EOFError, KeyboardInterrupt):
-                raise ValueError("Cancelled by user")
+        try:
+            user_answer = input("\n  > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raise ValueError("Cancelled by user")
 
-            # Parse comma-separated numbers
-            try:
-                choices = sorted({int(c.strip()) for c in raw.split(",") if c.strip()})
-            except ValueError:
-                print("  ⚠️  Please enter numbers separated by commas, e.g. 1 or 1,4.")
-                continue
+        if not user_answer:
+            return [(intent, args)]
 
-            if not choices or any(c not in (1, 2, 3, 4, 5) for c in choices):
-                print("  ⚠️  Valid options are 1, 2, 3, 4, 5.")
-                continue
+        _CLARIFY_SYSTEM = (
+            f"The user has already identified stock ticker '{ticker}'. "
+            "They were just asked what they want and replied below. "
+            "Call the appropriate ROUTING_TOOLS based on their reply. "
+            "You may call multiple tools if they want multiple things.\n\n"
+            "Number shortcuts the user may have typed:\n"
+            "  1 = current / latest price\n"
+            "  2 = historical price data (text) — use period='1mo' if none given\n"
+            "  3 = price between specific dates — use today's month if dates not given\n"
+            "  4 = company information, profile, financials & news\n"
+            "  5 = compare with another stock\n"
+            "  chart / graph / plot = chart (use chart_historical or chart_date_range)\n\n"
+            f"Always pass '{ticker}' as company_or_ticker."
+        )
 
-            if 5 in choices and len(choices) > 1:
-                print("  ⚠️  Option 5 (Compare) must be selected on its own.")
-                continue
+        gateway.check("LLM")
+        resp = self.client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": _CLARIFY_SYSTEM},
+                {"role": "user",   "content": user_answer},
+            ],
+            tools=ROUTING_TOOLS,
+            tool_choice="required",
+            max_tokens=TOKENS_CLASSIFY * 4,
+            temperature=TEMP_STRUCT,
+        )
 
-            # Option 5 — handled separately, return early
-            if choices == [5]:
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            return [(intent, args)]
+
+        actions: list[tuple[str, dict]] = []
+        for tc in msg.tool_calls:
+            tc_intent = tc.function.name
+            tc_args   = json.loads(tc.function.arguments)
+            tc_args["company_or_ticker"] = ticker   # always use resolved ticker
+            if tc_intent == "compare":
                 return [("compare", args)]
+            actions.append((tc_intent, tc_args))
 
-            # Collect params for option 2 (historical) if selected
-            hist_intent = None
-            hist_args: dict = {}
-            if 2 in choices:
-                period = input(
-                    "  Period (1d 5d 1mo 3mo 6mo 1y 2y 5y 10y ytd max) [default: 1mo]: "
-                ).strip() or "1mo"
-                fmt = Orchestrator._ask_output_format()
-                hist_args = {**args, "period": period, "interval": "1d", "output_format": fmt}
-                hist_intent = "chart_historical" if fmt == "chart" else "get_historical_stock_prices"
-
-            # Collect params for option 3 (date range) if selected
-            range_intent = None
-            range_args: dict = {}
-            if 3 in choices:
-                start = input("  Start date (YYYY-MM-DD): ").strip()
-                end   = input("  End date   (YYYY-MM-DD): ").strip()
-                fmt   = Orchestrator._ask_output_format()
-                range_args = {**args, "start": start, "end": end, "output_format": fmt}
-                range_intent = "chart_date_range" if fmt == "chart" else "get_stock_prices_between_dates"
-
-            # Build ordered action list
-            actions: list[tuple[str, dict]] = []
-            for c in choices:
-                if c == 1:
-                    actions.append(("get_current_stock_price", args))
-                elif c == 2 and hist_intent:
-                    actions.append((hist_intent, hist_args))
-                elif c == 3 and range_intent:
-                    actions.append((range_intent, range_args))
-                elif c == 4:
-                    actions.append(("get_company_info", args))
-
-            return actions
+        intent_names = ", ".join(a[0] for a in actions)
+        print(f"  🧠 [Orchestrator] Understood: {intent_names}")
+        return actions if actions else [(intent, args)]
 
     # ── public entry point ───────────────────────────────────────────────────
 
@@ -765,6 +815,7 @@ class Orchestrator:
         if not msg.tool_calls:
             return "Sorry, I couldn't understand your query. Try asking for a stock price by name or ticker."
 
+        # Use the first tool call to extract the ticker; all calls processed after clarification
         tc     = msg.tool_calls[0]
         intent = tc.function.name
         args   = json.loads(tc.function.arguments)
@@ -773,16 +824,21 @@ class Orchestrator:
         # Step 2 – resolve ticker (with exchange-suffix healing on failure)
         ticker = self._resolve_with_healing(args["company_or_ticker"])
 
-        # Step 3 – clarify if query has no explicit intent signal
-        # Both price/time words AND company-info phrases are checked.
-        # A bare name like "apple" has neither → always shows the menu.
+        # Step 3 – clarify if query has no explicit intent signal.
+        # A bare name like "apple" has no intent words → always asks the user.
         if not _query_has_explicit_intent(user_query):
             actions = self._clarify_intent(ticker, intent, args)
         else:
-            actions = [(intent, args)]
+            # Process ALL tool calls the LLM returned (parallel multi-intent)
+            actions = []
+            for tc in msg.tool_calls:
+                tc_intent = tc.function.name
+                tc_args   = json.loads(tc.function.arguments)
+                tc_args["company_or_ticker"] = ticker
+                actions.append((tc_intent, tc_args))
 
-        # Handle compare (must be alone)
-        if len(actions) == 1 and actions[0][0] == "compare":
+        # Handle compare
+        if any(a[0] == "compare" for a in actions):
             return self._run_comparison(initial_tickers=[ticker])
 
         # Step 4 – pre-fetch company snapshot once if any action needs it.

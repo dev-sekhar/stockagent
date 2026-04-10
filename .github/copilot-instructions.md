@@ -191,40 +191,38 @@ The `ask_user` tool:
 
 **The Orchestrator must not replicate this logic.**  Pass all candidates to the agent and let the agent's LLM tool loop handle all ambiguity.
 
-### 8. Multi-Select Intent Menu
+### 8. Multi-Intent Routing
 
-When `_clarify_intent` is called (bare company name, no explicit intent signal), users
-can enter **one or more options** separated by commas:
+The orchestrator supports routing a single query to **multiple intents** in two ways:
 
+**A. Explicit multi-intent query** (user types a full sentence):
+> "AAPL current price and company profile"
+
+The LLM may return multiple `tool_calls` from `ROUTING_TOOLS`. `handle()` processes ALL of them and executes each via `_execute_intent()`, joining results with `---`.
+
+**B. Clarification flow** (bare company name, no explicit intent):
+> You: `infosys`
+
+`_clarify_intent()` asks the user one free-form question:
 ```
-1   Current / latest price
-2   Historical data  (relative period)
-3   Price between two dates
-4   Company information & news
-5   Compare with another stock  (must be alone)
+  ❓ What would you like for INFY?
+     (e.g. 'current price', 'price and news', '3mo chart', '1mo data and company info', 'compare')
+
+  >
 ```
+The user's reply (any phrasing) is sent to the LLM with `ROUTING_TOOLS`. The LLM converts it into one or more tool calls:
+- `"1,4"` → get_current_stock_price + get_company_info
+- `"price and chart"` → get_current_stock_price + chart_historical
+- `"3mo chart and news"` → chart_historical(period=3mo) + get_company_info
 
-Examples: `1`, `1,4`, `3,4,5`, `2,4`
+**No hardcoded number-to-intent mapping exists.** The LLM handles all phrasing.
 
-**Rules enforced by `_clarify_intent`:**
-- Any combination of 1/2/3/4 is valid.
-- Option 5 must be entered alone.
-- If the selection contains **only** 1, 2, or 3, the company snapshot (profile, financials, news, sentiment) is **not fetched**.
-- Options 2 and 3 collect their parameters (period / date range / output format) once, before returning.
-- Returns `list[tuple[str, dict]]` — ordered action pairs consumed by `handle()`.
+**Company snapshot is only fetched** when `get_company_info`, `chart_historical`, or `chart_date_range` is in the action list (controlled by `_COMPANY_INTENTS` in `handle()`).
 
-**`handle()` pipeline for multi-select:**
-```python
-actions = self._clarify_intent(ticker, intent, args)
-needs_snapshot = any(a[0] in {"get_company_info","chart_historical","chart_date_range"} for a in actions)
-if needs_snapshot:
-    company_data, news = self._fetch_company_snapshot(ticker)
-for action_intent, action_args in actions:
-    results.append(self._execute_intent(action_intent, action_args, ticker, company_data, news))
-```
+**ROUTING_TOOLS** contains all 7 routable intents:
+`get_current_stock_price`, `get_historical_stock_prices`, `get_stock_prices_between_dates`, `get_company_info`, `chart_historical`, `chart_date_range`, `compare`
 
-When adding new intent types, add them to `_COMPANY_INTENTS` inside `handle()` if they
-require the company snapshot.
+When adding a new intent type, add it to ROUTING_TOOLS **and** add it to `_COMPANY_INTENTS` in `handle()` if it requires the company snapshot.
 
 ### 9. Access Gateway — External Call Gatekeeper
 
