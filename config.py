@@ -64,6 +64,14 @@ GOOGLE_NEWS_URL = os.getenv(
 )
 RSS_TIMEOUT = int(os.getenv("RSS_TIMEOUT", "8"))  # seconds per request
 
+# ── Chart viewer ─────────────────────────────────────────────────────────────
+# Local HTTP server port for the live-updating chart viewer.
+# Charts are always written to CHART_OUTPUT_FILE (fixed name, overwritten each
+# time) so a single browser tab stays live and auto-reloads on each new chart.
+CHART_SERVER_PORT  = int(os.getenv("CHART_SERVER_PORT",  "5500"))
+CHART_OUTPUT_FILE  = os.getenv("CHART_OUTPUT_FILE",       "stock_chart.html")
+CHART_VERSION_FILE = os.getenv("CHART_VERSION_FILE",      "chart_version.txt")
+
 # ── Access Gateway — external service kill-switches ───────────────────────────
 # Set any of these to "false" (case-insensitive) to block that category of
 # outbound call.  Useful for offline testing or compliance restrictions.

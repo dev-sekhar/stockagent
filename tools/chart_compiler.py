@@ -17,12 +17,75 @@ Subplot layout is inferred from the CurveSpec roles:
 Crosshair cursor and unified hover tooltip are always enabled.
 """
 import os
+import threading
+import time
 import webbrowser
+from functools import partial
+from http.server import SimpleHTTPRequestHandler
+from socketserver import TCPServer
 from typing import Sequence
 
 import pandas as pd
 
 from tools.curve_spec import CurveSpec
+from config import CHART_SERVER_PORT, CHART_OUTPUT_FILE, CHART_VERSION_FILE
+
+# ── Live-reload server ────────────────────────────────────────────────────────
+_server_started = False
+_server_lock    = threading.Lock()
+
+
+class _QuietHandler(SimpleHTTPRequestHandler):
+    """SimpleHTTPRequestHandler with suppressed access logs."""
+    def log_message(self, *args):  # noqa: D401
+        pass
+
+
+def _ensure_server(directory: str) -> bool:
+    """
+    Start a one-shot daemon HTTP server in *directory* on CHART_SERVER_PORT.
+    Safe to call multiple times — starts the server only once.
+    Returns True if server is (now) running, False if the port was unavailable.
+    """
+    global _server_started
+    with _server_lock:
+        if _server_started:
+            return True
+        handler = partial(_QuietHandler, directory=directory)
+        try:
+            httpd = TCPServer(("localhost", CHART_SERVER_PORT), handler)
+            httpd.allow_reuse_address = True
+            t = threading.Thread(target=httpd.serve_forever, daemon=True)
+            t.start()
+            _server_started = True
+            return True
+        except OSError:
+            # Port already in use — assume our server is already running.
+            _server_started = True
+            return True
+
+
+# JS injected into every chart — polls chart_version.txt every 2 s and reloads
+# the page automatically when the file contents change.
+# Use .replace() (not .format()) to avoid escaping every JS brace.
+_AUTORELOAD_JS = """
+<script>
+(function () {
+  var _v = null;
+  function check() {
+    var x = new XMLHttpRequest();
+    x.open('GET', '/VFILE_PLACEHOLDER?_=' + Date.now(), true);
+    x.onload = function () {
+      if (x.status === 200) {
+        if (_v === null) { _v = x.responseText; }
+        else if (_v !== x.responseText) { window.location.reload(); }
+      }
+    };
+    x.send();
+  }
+  setInterval(check, 2000);
+})();
+</script>""".replace("VFILE_PLACEHOLDER", CHART_VERSION_FILE)
 
 # ── Colour palettes ───────────────────────────────────────────────────────────
 _STOCK_PALETTE = [
@@ -366,15 +429,16 @@ class ChartCompiler:
 
         # ── Save + open ────────────────────────────────────────────────────────
         out_dir  = output_dir or os.getcwd()
-        # derive filename from stock tickers in the specs
-        safe = "_vs_".join(
-            s.ticker.replace(".", "_").replace("&", "") for s in stock_specs
-        )
-        filename = f"{safe}_{dates_str[0]}_{dates_str[-1]}.html"
-        filepath = os.path.join(out_dir, filename)
+        filepath = os.path.join(out_dir, CHART_OUTPUT_FILE)
 
-        # Build HTML — use to_html so we can inject the company panel
+        # Write a new version token so the browser tab auto-reloads.
+        version_path = os.path.join(out_dir, CHART_VERSION_FILE)
+        with open(version_path, "w", encoding="utf-8") as vf:
+            vf.write(str(time.time()))
+
+        # Build HTML and inject auto-reload script + optional company panel.
         chart_html = fig.to_html(include_plotlyjs="cdn", full_html=True)
+        chart_html = chart_html.replace("</body>", _AUTORELOAD_JS + "\n</body>")
         if company_data or news:
             panel = self._build_company_panel(company_data or {}, news or [])
             chart_html = chart_html.replace("</body>", panel + "\n</body>")
@@ -382,11 +446,14 @@ class ChartCompiler:
         with open(filepath, "w", encoding="utf-8") as fh:
             fh.write(chart_html)
 
-        webbrowser.open(f"file:///{filepath.replace(os.sep, '/')}")
+        # Start the local HTTP server (once) and open the browser.
+        _ensure_server(out_dir)
+        chart_url = f"http://localhost:{CHART_SERVER_PORT}/{CHART_OUTPUT_FILE}"
+        webbrowser.open(chart_url)
         print(f"  💾 [ChartCompiler] Saved → {filepath}")
 
         # ── Summary ────────────────────────────────────────────────────────────
-        lines = [f"📊 Chart → {filepath}"]
+        lines = [f"📊 Chart → {chart_url}"]
         for spec in stock_specs:
             p   = spec.meta.get("pct_chg", 0)
             o   = spec.meta.get("open",  0)
