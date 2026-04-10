@@ -42,41 +42,32 @@ import yfinance as yf
 from groq import Groq
 
 from agents.base_agent import BaseAgent
-from config import LLM_MODEL, TEMP_REASON, TOKENS_SENTIMENT
+from config import LLM_MODEL, TEMP_STRUCT, TOKENS_SENTIMENT
 
 _MODEL = LLM_MODEL
 
 _SYSTEM = """\
-You are a financial sentiment analyst and short-term market strategist.
+Role: Score news sentiment per article and predict next-trading-day price direction.
+Inputs: ticker, last 5 days closing prices, list of news articles.
 
-You will receive:
-  1. A stock ticker and its last 5 trading days' closing prices
-  2. A set of recent curated news articles (title + optional summary)
+Scoring rules:
+- sentiment: "positive" | "negative" | "neutral" per article
+- score: 1 (very negative) to 10 (very positive), 5 = neutral
+- overall: weighted average score across all articles
+- prediction: "bullish" | "bearish" | "neutral" for next trading day
+- confidence: "high" | "medium" | "low"
+- move: estimated % range (e.g. "+0.5-1.5%" or "-1-2%")
+- reasoning: max 2-3 sentences on key drivers
 
-Your task:
-  A. Assign a sentiment label and score to EACH article:
-       - sentiment: "positive", "negative", or "neutral"
-       - score:     1 (very negative) to 10 (very positive), 5 = neutral
-
-  B. Compute an overall sentiment score (weighted average, 1–10)
-
-  C. Predict the NEXT TRADING DAY's price direction:
-       - prediction: "bullish", "bearish", or "neutral"
-       - confidence: "high", "medium", or "low"
-       - move:       estimated percentage move range (e.g. "+0.5–1.5%" or "-1–2%")
-       - reasoning:  2–3 sentences explaining the key drivers
-
-Return ONLY valid JSON — no prose, no markdown fences:
+Output ONLY valid JSON (no markdown, no prose):
 {
-  "articles": [
-    { "title": "...", "sentiment": "positive|negative|neutral", "score": <1-10> }
-  ],
+  "articles": [{"title": "...", "sentiment": "positive|negative|neutral", "score": <1-10>}],
   "overall":    "positive|negative|neutral",
   "score":      <float 1-10>,
   "prediction": "bullish|bearish|neutral",
   "confidence": "high|medium|low",
-  "move":       "<estimated range e.g. +0.5-1.5%>",
-  "reasoning":  "..."
+  "move":       "<range e.g. +0.5-1.5%>",
+  "reasoning":  "<max 2-3 sentences>"
 }
 """
 
@@ -179,7 +170,7 @@ class SentimentAgent(BaseAgent):
                     {"role": "user",   "content": user_msg},
                 ],
                 max_tokens=TOKENS_SENTIMENT,
-                temperature=TEMP_REASON,
+                temperature=TEMP_STRUCT,
             )
             text  = (resp.choices[0].message.content or "").strip()
             match = re.search(r"\{.*\}", text, re.DOTALL)

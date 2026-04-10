@@ -316,8 +316,8 @@ stock-agent/
 
 ## Conventions
 
-- **Temperature**: always `0.1` for reasoning agents; `0.0` for structured-JSON-only responses.
-- **Max tokens**: `4096` for agents, `128` for classification/JSON calls.
+- **Temperature**: always `0.1` (`TEMP_REASON`) for reasoning/narrative agents; `0.0` (`TEMP_STRUCT`) for structured-JSON-only responses.
+- **Max tokens**: `4096` for agents, `256` for classification routing, `1024` for clarify-intent, smaller dedicated constants for each one-shot call.
 - **Tool definitions**: defined alongside their implementing function in `tools/`, imported into agents.
 - **System prompts**: defined as class-level strings on each `BaseAgent` subclass.
 - **Groq client**: constructed once in `main.py` / `Orchestrator.__init__()` and passed by dependency injection.
@@ -325,6 +325,76 @@ stock-agent/
 - **External calls**: all outbound network requests must call `gateway.check(category)` first (see Pattern 9).
 - **Output files**: interactive HTML charts are written to the project root and opened in the browser automatically.
 - **No hardcoded API keys**: always load from environment via `python-dotenv`.
+
+## LLM Prompt Best Practices
+
+These rules apply to every system prompt in this codebase.
+
+### Prompt structure: role → tool → output format → constraints
+
+Every system prompt must follow this declaration order:
+
+```
+Role: <one sentence describing the agent's single job>
+Tool: call <tool_name>(<params>).
+Output format:
+  <exact structure of expected output>
+Constraint: <what must never happen / error handling>
+```
+
+**Example — CurrentPriceAgent:**
+```
+Role: Fetch and report the current stock price.
+Tool: call get_current_price.
+Output format:
+  Price: [value] [currency]
+  Change: [±value] ([±%])
+  Volume: [volume]
+  Trade Date: [YYYY-MM-DD]
+Constraint: Never invent or estimate prices. If the tool returns an 'error' field, report it verbatim.
+```
+
+### Temperature discipline
+
+| Output type | Temperature constant | Value |
+|-------------|---------------------|-------|
+| Structured JSON (any agent returning JSON) | `TEMP_STRUCT` | `0.0` |
+| Narrative / markdown (profile, summaries, price reports) | `TEMP_REASON` | `0.1` |
+
+**Critical rule:** If a prompt ends with `"Output ONLY valid JSON"` or `"Return ONLY JSON"`, the call **must** use `TEMP_STRUCT = 0.0`.  Using `TEMP_REASON` for JSON calls is a bug.
+
+### Token budget discipline
+
+Use the purpose-specific constant from `config.py`; never hardcode or multiply:
+
+| Purpose | Constant | Default |
+|---------|----------|---------|
+| Intent routing (Step 1) | `TOKENS_CLASSIFY` | 256 |
+| Clarify-intent (multi-tool) | `TOKENS_CLARIFY` | 1024 |
+| General tool-calling loop | `TOKENS_AGENT` | 4096 |
+| Company profile (one-shot) | `TOKENS_PROFILE` | 1600 |
+| News curation (one-shot) | `TOKENS_NEWS` | 1200 |
+| Sentiment analysis (one-shot) | `TOKENS_SENTIMENT` | 1024 |
+| Candidate filter | `TOKENS_SEARCH` | 512 |
+| Sector key classification | `TOKENS_SECTOR` | 32 |
+| Supervisor diagnosis | `TOKENS_DIAGNOSE` | 200 |
+
+### One-shot vs tool-calling loop
+
+- **Use `BaseAgent.run()`** (tool-calling loop) when the LLM needs to call a tool and act on the result.
+- **Use a direct `client.chat.completions.create()`** (one-shot) when all data is already assembled and the LLM only needs to format / classify it. Set `tools=[]` on the agent class to signal this.
+
+### Routing separation
+
+The routing call in `orchestrator.py` (Step 1) is intentionally minimal: low token budget (`TOKENS_CLASSIFY`), `TEMP_STRUCT`, no history, tool-choice forced to `"required"`. This is the **classification call**. Execution happens in separate agent calls downstream.
+
+Never add narrative reasoning or multi-step logic to the routing system prompt. Its only job is: *"which tool(s) to call and with what parameters."*
+
+### Minimal context windows
+
+- Each agent's prompt is self-contained — it must not rely on conversation history from other agents.
+- Do not pass full raw data (e.g. hundreds of news articles) to the LLM; pre-filter (e.g. `candidates[:15]`) before the call.
+- Pass only the relevant subset needed for the task (see `NewsAgent._llm_curate` sending max 15 items, `CompanyProfileAgent.summarise` sending `news[:5]`).
 
 ## Environment Setup
 

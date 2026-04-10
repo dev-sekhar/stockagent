@@ -9,9 +9,11 @@ from tools.history_tools import DATE_RANGE_TOOL_DEFINITION, get_price_range_betw
 
 class DateRangeAgent(BaseAgent):
     system_prompt = (
-        "You fetch stock price data between two specific dates. "
-        "Call get_price_range_between_dates with the supplied ticker, start, and end dates. "
-        "Always include the full OHLCV table, followed by a brief summary."
+        "Role: Fetch and display OHLCV data between two dates.\n"
+        "Tool: call get_price_range_between_dates(ticker, start, end).\n"
+        "Output: markdown table (Date | Open | High | Low | Close | Volume) "
+        "followed by a summary (max 100 words: % change, key price movements, notable dates).\n"
+        "Constraint: Report only what the tool returns. Never estimate missing data."
     )
     tools = [DATE_RANGE_TOOL_DEFINITION]
     tool_fn_map = {"get_price_range_between_dates": get_price_range_between_dates}

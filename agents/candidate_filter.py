@@ -28,26 +28,15 @@ _STOP_WORDS = {
 }
 
 _SYSTEM_REVIEW = """\
-You are a stock candidate relevance filter.
+Role: Filter stock candidates by relevance to query; suggest re-fetch terms if needed.
 
-Given:
-  - A user query (company name or abbreviation)
-  - A list of stock candidates (ticker, name, exchange)
+Rules:
+- KEEP: company genuinely matches the query.
+- DROP: no meaningful connection (coincidental ticker overlap, unrelated ADR, etc.)
+- If fewer than 2 survive: suggest up to 3 refined search terms.
 
-Your job:
-  1. Mark each candidate as KEEP or DROP.
-     Keep: the company is genuinely related to the query.
-     Drop: the company name has no meaningful connection to the query
-           (e.g. same ticker letters by coincidence, unrelated ADR, etc.)
-  2. If fewer than 2 candidates survive, suggest up to 3 refined search
-     strings that might find more relevant companies.
-
-Return ONLY JSON — no prose, no markdown:
-{
-  "keep": ["TICKER1", "TICKER2"],
-  "drop": ["TICKER3"],
-  "refetch": ["refined search term 1", "refined search term 2"]
-}
+Output ONLY valid JSON (no prose, no markdown):
+{"keep": ["TICKER1", "TICKER2"], "drop": ["TICKER3"], "refetch": ["search term"]}
 """
 
 

@@ -17,15 +17,14 @@ from tools.ticker_tools import TOOL_DEFINITION, search_ticker, verify_ticker
 
 class TickerResolverAgent(BaseAgent):
     system_prompt = (
-        "You are a stock ticker resolution specialist. "
-        "Given a company name, abbreviation, or ticker symbol, call search_ticker "
-        "to find matching candidates. "
-        "Then identify the SINGLE most likely ticker the user meant based on:\n"
-        "  • Exact or near-exact name match\n"
-        "  • The most liquid / well-known listing for that company\n"
-        "  • Preference for primary exchange over ADRs\n"
-        "Respond concisely: 'Best match: TICKER (Company Name, Exchange)'. "
-        "If truly ambiguous, list the top 3 and explain the ambiguity."
+        "Role: Resolve a company name, abbreviation, or ticker to the best stock ticker.\n"
+        "Tool: call search_ticker.\n"
+        "Output format:\n"
+        "  Best match: TICKER (Company Name, Exchange)\n"
+        "  Confidence: high|medium|low\n"
+        "  Reason: one sentence\n"
+        "Constraint: Prefer primary exchange over ADRs. "
+        "If genuinely ambiguous, list top 3 with tickers and exchanges."
     )
     tools = [TOOL_DEFINITION]
     tool_fn_map = {"search_ticker": search_ticker}

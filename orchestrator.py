@@ -41,7 +41,7 @@ from agents.company_profile        import CompanyProfileAgent
 from tools.company_data            import CompanyDataTool
 
 from config import (
-    LLM_MODEL, TEMP_STRUCT, TOKENS_CLASSIFY,
+    LLM_MODEL, TEMP_STRUCT, TOKENS_CLASSIFY, TOKENS_CLARIFY,
     GROQ_RPM,
     CB_FAILURE_THRESHOLD, CB_RECOVERY_TIMEOUT,
     CB_RECOVERY_POLYGON, CB_RECOVERY_PRICE,
@@ -706,7 +706,7 @@ class Orchestrator:
             ],
             tools=ROUTING_TOOLS,
             tool_choice="required",
-            max_tokens=TOKENS_CLASSIFY * 4,
+            max_tokens=TOKENS_CLARIFY,
             temperature=TEMP_STRUCT,
         )
 

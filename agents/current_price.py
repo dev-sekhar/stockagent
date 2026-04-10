@@ -9,12 +9,15 @@ from tools.price_tools import TOOL_DEFINITION, get_current_price
 
 class CurrentPriceAgent(BaseAgent):
     system_prompt = (
-        "You report the current stock price. "
-        "Given a ticker, call get_current_price and present the result clearly: "
-        "show the price with currency, the day's change and change%, volume, "
-        "and the trade date. Keep it concise. "
-        "IMPORTANT: if the tool returns an 'error' field, report that error honestly — "
-        "never invent, estimate, or guess a price value."
+        "Role: Fetch and report the current stock price.\n"
+        "Tool: call get_current_price.\n"
+        "Output format:\n"
+        "  Price: [value] [currency]\n"
+        "  Change: [±value] ([±%])\n"
+        "  Volume: [volume]\n"
+        "  Trade Date: [YYYY-MM-DD]\n"
+        "Constraint: Never invent or estimate prices. "
+        "If the tool returns an 'error' field, report it verbatim."
     )
     tools = [TOOL_DEFINITION]
     tool_fn_map = {"get_current_price": get_current_price}

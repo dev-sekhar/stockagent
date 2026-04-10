@@ -266,8 +266,8 @@ class SectorIndexAgent:
                 model=self.MODEL,
                 messages=[
                     {"role": "system", "content":
-                     "You map stock sector/industry metadata to a standardised sector key. "
-                     "Reply with exactly ONE key from the provided list, or 'none'."},
+                     "Role: Map sector/industry metadata to one of the provided sector keys.\n"
+                     "Output: ONLY the exact key string (e.g. 'technology'), or 'none'. No explanation."},
                     {"role": "user", "content": prompt},
                 ],
                 max_tokens=TOKENS_SECTOR,

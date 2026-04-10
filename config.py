@@ -26,7 +26,8 @@ TEMP_STRUCT = float(os.getenv("LLM_TEMP_STRUCT", "0.0"))
 
 # ── Token limits per use-case ─────────────────────────────────────────────────
 TOKENS_AGENT     = int(os.getenv("TOKENS_AGENT",     "4096"))  # general tool-calling
-TOKENS_CLASSIFY  = int(os.getenv("TOKENS_CLASSIFY",   "256"))  # intent routing
+TOKENS_CLASSIFY  = int(os.getenv("TOKENS_CLASSIFY",   "256"))  # intent routing (Step 1)
+TOKENS_CLARIFY   = int(os.getenv("TOKENS_CLARIFY",   "1024"))  # intent clarification (multi-tool)
 TOKENS_SENTIMENT = int(os.getenv("TOKENS_SENTIMENT", "1024"))  # news sentiment
 TOKENS_NEWS      = int(os.getenv("TOKENS_NEWS",      "1200"))  # news curation
 TOKENS_PROFILE   = int(os.getenv("TOKENS_PROFILE",   "1600"))  # company profile

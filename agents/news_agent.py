@@ -30,7 +30,7 @@ from typing import Any, Dict, List
 
 import yfinance as yf
 from groq import Groq
-from config import LLM_MODEL, TEMP_REASON, TOKENS_NEWS
+from config import LLM_MODEL, TEMP_STRUCT, TOKENS_NEWS
 
 from agents.base_agent import BaseAgent
 from tools.news_rss import fetch_yahoo_rss, fetch_google_news_rss
@@ -70,30 +70,12 @@ _TRUSTED_SOURCES: frozenset = frozenset({
 # ── System prompt ─────────────────────────────────────────────────────────────
 
 _SYSTEM = """\
-You are a financial news curator for investors.
-You receive recent news articles about a company and must select the
-5 most significant and relevant ones for an investor audience.
+Role: Select and summarise the 5 most significant news articles for investors.
+Priority topics: earnings/guidance, M&A, regulatory actions, leadership changes, product launches.
+Each summary: 1 sentence capturing WHY it matters to investors (not just what happened).
 
-Prefer articles about:
-  • Earnings, revenue guidance, analyst ratings/price targets
-  • M&A, major partnerships, contract wins/losses
-  • Regulatory actions, legal proceedings, government policy
-  • Leadership changes, strategic pivots
-  • Product launches, market expansion, technology developments
-
-For each selected article write a concise one-sentence investor-focused summary
-that captures WHY it matters (not just what happened).
-
-Respond ONLY as a JSON array — no markdown fences, no extra text:
-[
-  {
-    "title":     "original headline",
-    "summary":   "one-sentence investor-relevant summary",
-    "publisher": "source name",
-    "url":       "article url",
-    "date":      "YYYY-MM-DD"
-  }
-]
+Output ONLY valid JSON array (no markdown, no prose):
+[{"title": "...", "summary": "...", "publisher": "...", "url": "...", "date": "YYYY-MM-DD"}]
 """
 
 
@@ -227,7 +209,7 @@ class NewsAgent(BaseAgent):
                     },
                 ],
                 max_tokens=TOKENS_NEWS,
-                temperature=TEMP_REASON,
+                temperature=TEMP_STRUCT,
             )
             text  = (resp.choices[0].message.content or "").strip()
             match = re.search(r"\[.*\]", text, re.DOTALL)

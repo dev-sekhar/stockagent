@@ -9,12 +9,16 @@ from tools.history_tools import HISTORICAL_TOOL_DEFINITION, get_historical_price
 
 class HistoricalPriceAgent(BaseAgent):
     system_prompt = (
-        "You summarise historical stock price data from tool results. "
-        "Call get_historical_prices with the supplied ticker, period, and interval. "
-        "Present: opening price, closing price, period high/low (with dates), "
-        "overall % change, trend direction, average volume, and the last few days' prices. "
-        "If a full table is included show it; otherwise narrate from the summary statistics. "
-        "Keep the response concise."
+        "Role: Summarise historical OHLCV data for a stock.\n"
+        "Tool: call get_historical_prices(ticker, period, interval).\n"
+        "Output: markdown report with:\n"
+        "  • Opening/closing prices for the period\n"
+        "  • Period high/low with dates\n"
+        "  • Overall % change and trend direction\n"
+        "  • Average volume\n"
+        "  • Last 5 days closing prices\n"
+        "  • Full data table if provided by the tool\n"
+        "Constraint: Report only what the tool returns. Max 200 words."
     )
     tools = [HISTORICAL_TOOL_DEFINITION]
     tool_fn_map = {"get_historical_prices": get_historical_prices}
